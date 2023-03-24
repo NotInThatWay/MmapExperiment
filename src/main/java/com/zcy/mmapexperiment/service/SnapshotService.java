@@ -67,19 +67,33 @@ public class SnapshotService {
         }
     }
 
+    /**
+     * 将Queue中的 Tick 通过内存映射，写入文件中
+     *
+     * @throws InterruptedException
+     * @throws IOException
+     */
     private void receiveToFile() throws InterruptedException, IOException {
-        while(true) {
+        while (true) {
             Tick tick = tickQ.take();
-            tickService.writeToFile(tick,1024);
+            tickService.writeToFile(tick, 1024);
         }
     }
 
+    /**
+     * 通过内存映射写入文件测试
+     *
+     * @param count 循环次数
+     * @return 写入的总时长
+     * @throws InterruptedException
+     * @throws IOException
+     */
     private long receiveToFileTest(int count) throws InterruptedException, IOException {
         long total = 0L;
-        while(count-- > 0) {
+        while (count-- > 0) {
             Tick tick = tickQ.take();
             long start = System.currentTimeMillis();
-            tickService.writeToFile(tick,1024);
+            tickService.writeToFile(tick, 1024);
             long end = System.currentTimeMillis();
             total += end - start;
 
@@ -87,6 +101,9 @@ public class SnapshotService {
         return total;
     }
 
+    /**
+     * 内存映射写入文件线程
+     */
     private void receiveToFileThread() {
         for (int i = 0; i < numThread; i++) {
             ThreadPoolService.receiveToFileExecutor.execute(() -> {
@@ -100,6 +117,9 @@ public class SnapshotService {
         }
     }
 
+    /**
+     * 写入内存线程
+     */
     private void receiveToMemoryThread() {
         for (int i = 0; i < numThread; i++) {
             ThreadPoolService.receiveToMemoryExecutor.execute(() -> {
@@ -111,6 +131,7 @@ public class SnapshotService {
             });
         }
     }
+
 
     /**
      * 接收 Tick 信息

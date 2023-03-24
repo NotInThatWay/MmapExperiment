@@ -1,6 +1,5 @@
 package com.zcy.mmapexperiment.service;
 
-
 import com.alibaba.fastjson.JSONObject;
 import com.zcy.mmapexperiment.dao.Tick;
 import jakarta.annotation.PostConstruct;
@@ -49,6 +48,28 @@ public class TickService {
     }
 
     /**
+     * 通过内存映射读取当前股票的所有 Tick 信息
+     *
+     * @param stkCode 股票代码
+     * @return 当前股票的 Tick 信息，存于List中
+     * @throws Exception
+     */
+    public List<Tick> readFromFile(String stkCode) throws Exception {
+        String filePath = this.path + "Tick//" + stkCode + ".csv";  // 文件名
+        FileChannel fc = new RandomAccessFile(filePath, "r").getChannel();
+        MappedByteBuffer buffer = fc.map(FileChannel.MapMode.READ_ONLY, 0, fc.size());
+        int length = (int) fc.size();
+        byte[] bytes = new byte[length];
+        buffer.get(bytes);
+        StringBuffer sb = new StringBuffer("[");
+        String content = new String(bytes);
+        sb.append(content);
+        sb.deleteCharAt(sb.length() - 1);
+        sb.append("]");
+        return JSONObject.parseArray(sb.toString(), Tick.class);
+    }
+
+    /**
      * 通过内存映射写入文件
      *
      * @param tick 要写入的 Tick 信息
@@ -58,7 +79,7 @@ public class TickService {
         String stkCode = tick.getStkCode();
         String filePath = this.path + "Tick//" + stkCode + ".csv";  // 文件名
         FileChannel fc = new RandomAccessFile(filePath, "rw").getChannel();
-        String tickJSString = JSONObject.toJSONString(tick) + "\n";
+        String tickJSString = JSONObject.toJSONString(tick) + ",";
         MappedByteBuffer buffer = fc.map(FileChannel.MapMode.READ_WRITE, fc.size(), tickJSString.getBytes().length);
         buffer.put(tickJSString.getBytes());
         fc.close();

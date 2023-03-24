@@ -15,8 +15,13 @@ public class MmapController {
     @Autowired
     TickService tickService;
 
+    /**
+     * 从内存中读取测试
+     *
+     * @return 单次读取时间平均值
+     */
     @GetMapping("/readFromMemory")
-    public long test(){
+    public long test() {
         return snapshotService.readFromMemoryTest(20000);
     }
 
