@@ -10,8 +10,6 @@ import java.util.concurrent.Executors;
 public class ThreadPoolService {
     public static ExecutorService receiveToMemoryExecutor = Executors.newFixedThreadPool(50);
 
-    public static ExecutorService readFromMemoryExecutor = Executors.newFixedThreadPool(50);
-
     public static ExecutorService receiveToFileExecutor = Executors.newFixedThreadPool(50);
 
     public static ExecutorService singleThreadExecutor = Executors.newSingleThreadExecutor();

@@ -4,34 +4,45 @@ import com.alibaba.fastjson.JSONObject;
 import com.zcy.mmapexperiment.dao.Tick;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import sun.nio.ch.FileChannelImpl;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.lang.reflect.Method;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 @Slf4j
 public class TickService {
     public static Map<String, List<Tick>> tickMap = new ConcurrentHashMap<>();
 
+    @Autowired
+    FileChannelService fileChannelService;
     @Value("${config.numStock}")
     private int numStock;
+
+    @Value("${config.bufferSize}")
+    private int bufferSize;
 
     @Value("${config.path}")
     private String path;
 
     @PostConstruct
-    public void init() {
+    public void init() {    // 初始化项
         // 创建目录
-        File directory = new File(this.path + "Tick");
+        File directory = new File(this.path + bufferSize + "//Tick");
         if (!directory.exists()) {
             directory.mkdirs();
         }
@@ -43,29 +54,50 @@ public class TickService {
      * @param stkCode 股票代码
      * @return 该股票所有的Tick信息
      */
-    public List<Tick> readFromMemory(String stkCode) {
-        return tickMap.get(stkCode);
+    public List<Tick> readFromMemory(String stkCode, int num) {
+        List<Tick> tickList = tickMap.get(stkCode);
+        if (tickList != null && num <= tickList.size()) {
+            Stream<Tick> stream = tickList.stream();
+            ArrayList<Tick> result = stream.skip(tickList.size() - num).collect(Collectors.toCollection(ArrayList::new));
+            return result;
+        } else {
+            return tickList;
+        }
     }
 
     /**
      * 通过内存映射读取当前股票的所有 Tick 信息
      *
-     * @param stkCode 股票代码
-     * @return 当前股票的 Tick 信息，存于List中
+     * @param stkCode 所要读取的股票代码
+     * @param num     要查询的 Tick 的 数量
+     * @return 当前查询的股票的 Tick
      * @throws Exception
      */
-    public List<Tick> readFromFile(String stkCode) throws Exception {
-        String filePath = this.path + "Tick//" + stkCode + ".csv";  // 文件名
-        FileChannel fc = new RandomAccessFile(filePath, "r").getChannel();
-        MappedByteBuffer buffer = fc.map(FileChannel.MapMode.READ_ONLY, 0, fc.size());
-        int length = (int) fc.size();
-        byte[] bytes = new byte[length];
+    public List<Tick> readFromFile(String stkCode, int num) throws Exception {
+        FileChannel fc = fileChannelService.fcMap.get(stkCode);
+        long querySize = (long) bufferSize * num;
+        long fileSize = fc.size();
+        MappedByteBuffer buffer;
+        byte[] bytes;
+        if (fileSize >= querySize) { // 文件中 Tick 数量 >= 请求读取 Tick 数量
+            buffer = fc.map(FileChannel.MapMode.READ_ONLY, fileSize - querySize, querySize);
+            bytes = new byte[(int) querySize];
+        } else {    // 文件中 Tick 数量 < 请求读取 Tick 数量
+            buffer = fc.map(FileChannel.MapMode.READ_ONLY, 0, fileSize);
+            bytes = new byte[(int) fileSize];
+        }
+
         buffer.get(bytes);
         StringBuffer sb = new StringBuffer("[");
         String content = new String(bytes);
         sb.append(content);
         sb.deleteCharAt(sb.length() - 1);
         sb.append("]");
+
+//        Method m = FileChannelImpl.class.getDeclaredMethod("unmap", MappedByteBuffer.class);
+//        m.setAccessible(true);
+//        m.invoke(FileChannelImpl.class, buffer);
+
         return JSONObject.parseArray(sb.toString(), Tick.class);
     }
 
@@ -77,97 +109,43 @@ public class TickService {
      */
     public void writeToFile(Tick tick) throws IOException {
         String stkCode = tick.getStkCode();
-        String filePath = this.path + "Tick//" + stkCode + ".csv";  // 文件名
+        String filePath = this.path + bufferSize + "//Tick//" + stkCode + ".csv";  // 文件名
         FileChannel fc = new RandomAccessFile(filePath, "rw").getChannel();
-        String tickJSString = JSONObject.toJSONString(tick) + ",";
-        MappedByteBuffer buffer = fc.map(FileChannel.MapMode.READ_WRITE, fc.size(), tickJSString.getBytes().length);
-        buffer.put(tickJSString.getBytes());
-        fc.close();
-    }
-
-    /**
-     * 通过内存映射写入文件的重载方法
-     *
-     * @param tick       要写入的 Tick 信息
-     * @param bufferSize 自定义内存映射的尺寸，必须大于 Tick 尺寸
-     * @throws IOException
-     */
-    public void writeToFile(Tick tick, long bufferSize) throws IOException {
-//        long start = System.nanoTime();
-        String stkCode = tick.getStkCode();
-        String filePath = this.path + "Tick//" + stkCode + ".csv";  // 文件名
-        FileChannel fc = new RandomAccessFile(filePath, "rw").getChannel();
-        String tickJSString = JSONObject.toJSONString(tick) + "\n";
+        String tickJSONStr = JSONObject.toJSONString(tick) + ",";
+        long bufferSize = tickJSONStr.getBytes().length;
         MappedByteBuffer buffer = fc.map(FileChannel.MapMode.READ_WRITE, fc.size(), bufferSize);
-        buffer.put(tickJSString.getBytes());
+        buffer.put(tickJSONStr.getBytes());
         fc.close();
-//        System.out.println(System.nanoTime()-start);
     }
 
     /**
-     * 测试内存映射写入时间
+     * 通过内存映射写入文件的重载方法，自定义 Buffer 大小
      *
      * @param tick 要写入的 Tick 信息
-     * @return 写入耗时，单位纳秒
+     * @param size 自定义内存映射的尺寸，必须大于 Tick 的大小
      * @throws IOException
      */
-    public long writeToFileTest(Tick tick) throws IOException {
-        long start = System.nanoTime();
-        writeToFile(tick);
-        long end = System.nanoTime();
-        return end - start;
+    public void writeToFile(Tick tick, long size) throws IOException {
+        String stkCode = tick.getStkCode();
+        String filePath = this.path + bufferSize + "//Tick//" + stkCode + ".csv";  // 文件名
+        FileChannel fc = new RandomAccessFile(filePath, "rw").getChannel();
+        String tickJSONStr = JSONObject.toJSONString(tick) + ",";
+        long strLength = tickJSONStr.getBytes().length;
+        long bufferSize = size >= strLength ? size : strLength;
+        MappedByteBuffer buffer = fc.map(FileChannel.MapMode.READ_WRITE, fc.size(), bufferSize);
+        buffer.put(tickJSONStr.getBytes());
+        fc.close();
     }
 
     /**
-     * 测试内存映射写入时间
+     * 将 Tick 写入内存
      *
-     * @param tick       要写入的 Tick 信息
-     * @param bufferSize 自定义内存映射尺寸
-     * @return 写入耗时，单位纳秒
-     * @throws IOException
+     * @param tick 获取到的 Tick 信息
      */
-    public long writeToFileTest(Tick tick, long bufferSize) throws IOException {
-        long start = System.nanoTime();
-        writeToFile(tick, bufferSize);
-        long end = System.nanoTime();
-        return end - start;
-    }
-
-    /**
-     * 测试从内存随机读取的速度
-     *
-     * @return 读取时常，单位为纳秒
-     */
-    public long readFromMemoryTest() {
-        String stkCode = randomStkCode(numStock);
-        long start = System.nanoTime();
-        readFromMemory(stkCode);
-        long end = System.nanoTime();
-        return end - start;
-    }
-
-    /**
-     * 测试从内存随机读取的速度
-     *
-     * @param stkCode 要读取的股票代码
-     * @return 读取时间，单位为纳秒
-     */
-    public long readFromMemoryTest(String stkCode) {
-        long start = System.nanoTime();
-        readFromMemory(stkCode);
-        long end = System.nanoTime();
-        return end - start;
-    }
-
-
-    /**
-     * 随机股票代码
-     *
-     * @param numStock 股票的数量
-     * @return 随机生成的股票代码
-     */
-    private String randomStkCode(int numStock) {
-        Random rand = new Random(System.nanoTime());
-        return "sh" + String.format("%06d", rand.nextInt(numStock));
+    public void writeToMemory(Tick tick) {
+        String code = tick.getStkCode();
+        List<Tick> tickList = tickMap.getOrDefault(code, new ArrayList<>());
+        tickList.add(tick);
+        tickMap.put(code, tickList);
     }
 }
