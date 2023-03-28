@@ -15,14 +15,19 @@ import java.util.concurrent.ConcurrentHashMap;
 public class FileChannelService {
     public Map<String, FileChannel> fcMap = new ConcurrentHashMap<>();
     @Value("${config.numStock}")
-    private int numStock;
+    private int numStock;   // 股票的数量
 
     @Value("${config.path}")
-    private String path;
+    private String path;    // Tick 信息的文件存储路径
 
     @Value("${config.bufferSize}")
     private int bufferSize;
 
+    /**
+     * 提前初始化FileChannel，提升实际映射时的速度
+     *
+     * @throws IOException
+     */
     @PostConstruct
     private void initMap() throws IOException {
         for (int i = 0; i < numStock; i++) {

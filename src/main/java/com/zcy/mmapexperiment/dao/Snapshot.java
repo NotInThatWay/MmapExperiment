@@ -7,5 +7,5 @@ import org.springframework.stereotype.Component;
 @Data
 public class Snapshot {
 //    long time;
-    String content;
+//    String content;
 }
